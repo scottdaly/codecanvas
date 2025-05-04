@@ -12,7 +12,8 @@ export interface DesignElement {
   type: "div"; // Only divs for now
   name: string; // For the layers panel later
   style: ElementStyle; // Represents CSS properties
-  // children?: ElementId[]; // For nesting later
+  parentId: ElementId | null; // ID of the parent element, null for root elements
+  children: ElementId[]; // IDs of child elements, ordered
 }
 
 // Type for the state slice managing elements
