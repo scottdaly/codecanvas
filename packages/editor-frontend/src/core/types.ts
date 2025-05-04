@@ -22,5 +22,7 @@ export interface ElementsSlice {
   addElement: (element: DesignElement) => void;
   selectElement: (id: ElementId | null) => void;
   updateElementStyle: (id: ElementId, style: Partial<ElementStyle>) => void;
+  updateElementName: (id: ElementId, newName: string) => void;
+  deleteElement: (id: ElementId) => void;
   // More actions later: deleteElement, moveElement, resizeElement etc.
 }

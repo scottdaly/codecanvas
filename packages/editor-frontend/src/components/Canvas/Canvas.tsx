@@ -1,8 +1,7 @@
 // packages/editor-frontend/src/components/Canvas/Canvas.tsx
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { useEditorStore } from "../../core/store";
-import { DesignElement, ElementId, ElementStyle } from "../../core/types";
-// No more styles import
+import { DesignElement, ElementId } from "../../core/types";
 import clsx from "clsx";
 import { ResizeHandles } from "./ResizeHandles";
 import type { HandleType } from "./ResizeHandles";
@@ -41,6 +40,9 @@ export const Canvas: React.FC = () => {
   );
   const selectElement = useEditorStore((state) => state.selectElement);
   const updateStyle = useEditorStore((state) => state.updateElementStyle);
+  // Get interaction actions
+  const startInteraction = useEditorStore((state) => state.startInteraction);
+  const endInteraction = useEditorStore((state) => state.endInteraction);
 
   // --- Interaction State ---
   const [interactionMode, setInteractionMode] =
@@ -52,8 +54,12 @@ export const Canvas: React.FC = () => {
   const canvasRef = useRef<HTMLDivElement>(null); // Ref for the canvas div
   const justFinishedInteraction = useRef(false); // Ref flag for click handling
 
-  const interactionMoveHandlerRef = useRef<(event: MouseEvent) => void>();
-  const interactionEndHandlerRef = useRef<(event?: MouseEvent) => void>(); // Allow event in ref type
+  const interactionMoveHandlerRef = useRef<
+    ((event: MouseEvent) => void) | null
+  >(null);
+  const interactionEndHandlerRef = useRef<
+    ((event?: MouseEvent) => void) | null
+  >(null); // Allow event in ref type
 
   // --- Define Stable wrapper functions FIRST ---
   const handleWindowMouseMove = useCallback((event: MouseEvent) => {
@@ -233,6 +239,9 @@ export const Canvas: React.FC = () => {
     // Define the core logic for ending interaction
     const endInteractionLogic = (event?: MouseEvent) => {
       if (interactionMode !== "idle") {
+        // Signal interaction end to the store *before* resetting local state
+        endInteraction();
+
         console.log("Interaction End - Mode:", interactionMode);
         const prevMode = interactionMode;
         setInteractionMode("idle");
@@ -258,7 +267,12 @@ export const Canvas: React.FC = () => {
     ) {
       document.body.style.cursor = "default";
     }
-  }, [interactionMode, handleWindowMouseMove, handleWindowMouseUp]);
+  }, [
+    interactionMode,
+    handleWindowMouseMove,
+    handleWindowMouseUp,
+    endInteraction, // Add endInteraction to dependencies
+  ]);
 
   // --- Border Hover Detection ---
   const handleCanvasMouseMove = useCallback(
@@ -322,20 +336,36 @@ export const Canvas: React.FC = () => {
           : "default";
       }
     },
-    [interactionMode, selectedElement, hoveredHandleType]
+    [
+      interactionMode,
+      selectedElement,
+      hoveredHandleType,
+      startInteraction, // Add startInteraction to dependencies
+    ]
   );
 
   // -- Define Resize Start *BEFORE* Drag Start --
   const handleResizeStart = useCallback(
     (event: React.MouseEvent<HTMLDivElement>, handleType: HandleType) => {
-      event.stopPropagation(); // Still important here!
+      // No need to stop propagation here anymore, canvas handler did it
+      // event.stopPropagation();
+
+      // Check selectedElement directly, as ID isn't passed
+      if (!selectedElement || interactionMode !== "idle") {
+        console.warn("Resize start condition not met", {
+          selectedElement,
+          interactionMode,
+        });
+        return;
+      }
+
       console.log(
-        "Resize Start Attempt - Current Mode:",
-        interactionMode,
-        "Handle:",
-        handleType
+        "Resize Start - Handle:",
+        handleType,
+        "Mode:",
+        interactionMode
       );
-      if (!selectedElement) return;
+
       if (hoveredHandleType) {
         setHoveredHandleType(null);
         document.body.style.cursor = "default";
@@ -349,8 +379,9 @@ export const Canvas: React.FC = () => {
         top: parsePx(style.top),
       };
 
-      console.log("Resize Start - Handle:", handleType);
       setInteractionMode("resizing");
+      startInteraction();
+
       interactionStartInfo.current = {
         elementId: selectedElement.id,
         handleType: handleType,
@@ -369,23 +400,22 @@ export const Canvas: React.FC = () => {
       handleWindowMouseMove,
       handleWindowMouseUp,
       hoveredHandleType,
+      startInteraction, // Add startInteraction to dependencies
     ]
   );
 
-  // Drag Start Handler - Modified to check for border hover first
+  // Drag Start Handler - Now responsible for detecting resize OR drag
   const handleDragStart = useCallback(
     (event: React.MouseEvent<HTMLDivElement>, id: ElementId) => {
-      if (hoveredHandleType) {
-        console.log(
-          "Mouse down on border/handle, initiating resize:",
-          hoveredHandleType
-        );
-        handleResizeStart(event, hoveredHandleType);
-        return;
-      }
+      // Stop propagation is now handled by the caller (handleCanvasMouseDown)
+      // event.stopPropagation();
+      console.log(
+        "Drag Start (from Canvas handler) - Element:",
+        id,
+        "Mode:",
+        interactionMode
+      );
 
-      event.stopPropagation();
-      console.log("Drag Start Attempt - Current Mode:", interactionMode);
       if (interactionMode !== "idle") return;
 
       const element = elements[id];
@@ -396,12 +426,15 @@ export const Canvas: React.FC = () => {
         return;
       }
 
-      console.log("Drag Start - Element:", id);
+      // Selection logic might happen *before* this is called now,
+      // but double-check just in case.
       if (selectedElementId !== id) {
         selectElement(id);
       }
 
       setInteractionMode("dragging");
+      startInteraction(); // Signal interaction start
+
       interactionStartInfo.current = {
         elementId: id,
         startX: event.clientX,
@@ -420,8 +453,9 @@ export const Canvas: React.FC = () => {
       selectElement,
       handleWindowMouseMove,
       handleWindowMouseUp,
-      hoveredHandleType,
-      handleResizeStart,
+      handleResizeStart, // Keep for delegation
+      startInteraction,
+      canvasRef, // Add canvasRef back as dependency
     ]
   );
 
@@ -432,7 +466,11 @@ export const Canvas: React.FC = () => {
       return;
     }
 
-    console.log("Canvas Click - Current Mode:", interactionMode);
+    // This logic is now mostly handled by handleCanvasMouseDown deciding not to drag/resize
+    console.log(
+      "Canvas Click (for deselection) - Current Mode:",
+      interactionMode
+    );
     if (interactionMode === "idle") {
       selectElement(null);
       if (hoveredHandleType) {
@@ -440,7 +478,127 @@ export const Canvas: React.FC = () => {
         document.body.style.cursor = "default";
       }
     }
-  }, [interactionMode, selectElement, hoveredHandleType]);
+  }, [
+    interactionMode,
+    selectElement,
+    hoveredHandleType,
+    justFinishedInteraction,
+  ]);
+
+  // --- NEW: Centralized MouseDown Handler for Canvas ---
+  const handleCanvasMouseDown = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      // Prevent default browser drag behavior if needed
+      // event.preventDefault();
+
+      // Ignore if not left click
+      if (event.button !== 0) return;
+
+      if (!canvasRef.current) return;
+
+      // Calculate click coordinates relative to the scrolled canvas
+      const canvasRect = canvasRef.current.getBoundingClientRect();
+      const scrollLeft = canvasRef.current.scrollLeft;
+      const scrollTop = canvasRef.current.scrollTop;
+      const mouseX = event.clientX - canvasRect.left + scrollLeft;
+      const mouseY = event.clientY - canvasRect.top + scrollTop;
+
+      let targetElement: DesignElement | null = null;
+      let detectedHandle: HandleType | null = null;
+      const threshold = 6; // Keep threshold for edge detection
+
+      // Iterate over elements to find which one was clicked (if any)
+      // Iterate in reverse order so topmost elements are checked first
+      const elementsToCheck = Object.values(elements).reverse();
+      for (const element of elementsToCheck) {
+        const style = element.style;
+        const elRect = {
+          left: parsePx(style.left),
+          top: parsePx(style.top),
+          width: parsePx(style.width),
+          height: parsePx(style.height),
+          right: parsePx(style.left) + parsePx(style.width),
+          bottom: parsePx(style.top) + parsePx(style.height),
+        };
+
+        // Check if click is within the element's threshold area
+        const withinXThreshold =
+          mouseX >= elRect.left - threshold &&
+          mouseX <= elRect.right + threshold;
+        const withinYThreshold =
+          mouseY >= elRect.top - threshold &&
+          mouseY <= elRect.bottom + threshold;
+
+        if (withinXThreshold && withinYThreshold) {
+          targetElement = element; // Found the potential target element
+          detectedHandle = null; // Reset for this element
+
+          // Determine handle type based purely on proximity to edges/corners within threshold
+          const onLeft = Math.abs(mouseX - elRect.left) < threshold;
+          const onRight = Math.abs(mouseX - elRect.right) < threshold;
+          const onTop = Math.abs(mouseY - elRect.top) < threshold;
+          const onBottom = Math.abs(mouseY - elRect.bottom) < threshold;
+
+          // Corner detection (priority)
+          if (onTop && onLeft) detectedHandle = "top-left";
+          else if (onTop && onRight) detectedHandle = "top-right";
+          else if (onBottom && onLeft) detectedHandle = "bottom-left";
+          else if (onBottom && onRight) detectedHandle = "bottom-right";
+          // Edge detection (use bounds check for opposite axis)
+          else if (onTop) detectedHandle = "top";
+          else if (onBottom) detectedHandle = "bottom";
+          else if (onLeft) detectedHandle = "left";
+          else if (onRight) detectedHandle = "right";
+
+          break; // Stop checking other elements once the target is found
+        }
+      }
+
+      // --- Decide action based on findings --- //
+
+      if (targetElement) {
+        // Select the target element if it's not already selected
+        if (selectedElementId !== targetElement.id) {
+          selectElement(targetElement.id);
+        }
+
+        // Prevent click from deselecting via handleCanvasClick
+        event.stopPropagation();
+
+        if (detectedHandle) {
+          // Initiate Resize
+          console.log(
+            "Canvas MouseDown starting RESIZE for",
+            targetElement.id,
+            "handle:",
+            detectedHandle
+          );
+          handleResizeStart(event, detectedHandle);
+        } else {
+          // Initiate Drag
+          console.log("Canvas MouseDown starting DRAG for", targetElement.id);
+          handleDragStart(event, targetElement.id);
+        }
+      } else {
+        // Click was on the background, deselect
+        console.log("Canvas MouseDown on background, deselecting.");
+        if (selectedElementId !== null) {
+          selectElement(null);
+        }
+        // Do not stop propagation, allow potential canvas background actions?
+        // Or maybe stop it if we are sure deselection is the only goal?
+      }
+    },
+    [
+      selectedElementId, // Need current selection ID to compare
+      elements, // Need elements map if handleDragStart uses it internally
+      interactionMode, // Check interactionMode in resize/drag starts
+      canvasRef,
+      handleResizeStart,
+      handleDragStart,
+      selectElement, // Need to call selectElement
+    ]
+  );
 
   useEffect(() => {
     return () => {
@@ -463,25 +621,25 @@ export const Canvas: React.FC = () => {
     <div
       ref={canvasRef}
       className={clsx("relative w-full h-full overflow-auto", checkeredBg)}
-      onClick={handleCanvasClick}
+      onClick={handleCanvasClick} // Keep for explicit deselection clicks
       onMouseMove={handleCanvasMouseMove}
+      onMouseDown={handleCanvasMouseDown} // NEW: Attach main handler here
     >
       {elementList.map((element: DesignElement) => (
         <div
           key={element.id}
           className={clsx(
-            "box-border absolute pointer-events-auto",
+            "box-border absolute pointer-events-auto", // Keep pointer-events-auto for rendering, but mousedown is handled by canvas
             selectedElementId !== element.id &&
               interactionMode === "idle" &&
               "hover:outline hover:outline-1 hover:outline-blue-400",
             selectedElementId === element.id &&
               "outline outline-2 outline-blue-600",
-            interactionMode === "idle" && !hoveredHandleType && "cursor-grab",
+            interactionMode === "idle" && "cursor-grab", // Default to grab if idle
             "select-none"
           )}
           style={element.style}
-          onMouseDown={(e) => handleDragStart(e, element.id)}
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()} // Keep stopping click prop for selection mgmt
         >
           {/* Element Content Area */}
         </div>

@@ -10,6 +10,7 @@ export const PropertiesPanel: React.FC = () => {
     state.selectedElementId ? state.elements[state.selectedElementId] : null
   );
   const updateStyle = useEditorStore((state) => state.updateElementStyle);
+  const deleteElement = useEditorStore((state) => state.deleteElement);
 
   const handleStyleChange = (
     property: keyof ElementStyle,
@@ -117,6 +118,21 @@ export const PropertiesPanel: React.FC = () => {
         </div>
       </div>
       {/* Add more property groups (border, padding etc) */}
+
+      {/* Delete Button */}
+      <div className="mt-4 pt-4 border-t border-gray-200">
+        <button
+          className="w-full bg-red-500 hover:bg-red-700 text-white text-sm py-2 px-4 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={() => {
+            if (selectedElementId) {
+              deleteElement(selectedElementId);
+            }
+          }}
+          disabled={!selectedElementId}
+        >
+          Delete Element
+        </button>
+      </div>
     </div>
   );
 };

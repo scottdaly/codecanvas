@@ -22,7 +22,7 @@ interface ResizeHandlesProps {
 
 // Basic handle styles - adjust size/appearance as needed
 const handleBaseClasses =
-  "absolute w-2 h-2 border border-blue-700 bg-white rounded-sm";
+  "absolute w-3 h-3 border border-blue-700 bg-white rounded-sm";
 
 // Cursor styles based on handle type
 const cursorMap: Record<HandleType, string> = {
@@ -77,9 +77,9 @@ export const ResizeHandles: React.FC<ResizeHandlesProps> = ({
       {handles.map((type) => (
         <div
           key={type}
-          className={`${handleBaseClasses} ${cursorMap[type]} ${positionMap[type]} pointer-events-auto`} // Re-enable pointer events for handles
+          className={`${handleBaseClasses} ${cursorMap[type]} ${positionMap[type]}`} // Purely visual, remove pointer-events-auto
           data-handle-type={type}
-          onMouseDown={(e) => onResizeStart(e, type)}
+          // onMouseDown handler removed - detection is centralized in Canvas handleDragStart
         />
       ))}
     </div>
